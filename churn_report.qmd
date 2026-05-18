@@ -1,0 +1,400 @@
+---
+title: "Харилцагчийн Churn Таамаглал"
+subtitle: "Decision Tree — sklearn ашиглахгүй бүрэн хэрэгжүүлэлт"
+author: "Өөрийн нэр"
+date: today
+format:
+  html:
+    toc: true
+    toc-depth: 3
+    toc-title: "Гарчиг"
+    code-fold: true
+    code-tools: true
+    theme: cosmo
+    embed-resources: true
+    fig-width: 9
+    fig-height: 5
+  pdf:
+    toc: true
+    toc-depth: 3
+    fig-width: 7
+    fig-height: 4
+execute:
+  echo: true
+  warning: false
+  message: false
+jupyter: python3
+---
+
+## 1. Танилцуулга
+
+Энэхүү тайланд **банкны харилцагч гарах эсэхийг** таамаглах Decision Tree загварыг баримтжуулна.
+
+::: {.callout-note}
+**Гол онцлог:** `sklearn.tree` болон `sklearn.ensemble` ашиглахгүйгээр Gini Impurity-д суурилсан CART алгоритмыг **бүрэн гараар** хэрэгжүүлсэн.
+:::
+
+Ашигласан номын сан:
+
+```{python}
+import numpy as np
+import pandas as pd
+import matplotlib.pyplot as plt
+import seaborn as sns
+from collections import Counter
+
+print("Бүх номын сан амжилттай ачааллагдлаа ✓")
+```
+
+---
+
+## 2. Өгөгдөл
+
+### 2.1 Ачаалах
+
+```{python}
+df = pd.read_csv("Churn_Modelling.csv")
+print(f"Хэмжээ   : {df.shape[0]} мөр × {df.shape[1]} багана")
+print(f"Churn хувь: {df['Exited'].mean()*100:.1f}%")
+df.head(3)
+```
+
+### 2.2 Баганын тайлбар
+
+| Багана | Төрөл | Тайлбар |
+|---|---|---|
+| `CreditScore` | Тоон | Зээлийн оноо |
+| `Geography` | Категори | Улс (France / Germany / Spain) |
+| `Gender` | Категори | Хүйс → Male=1, Female=0 |
+| `Age` | Тоон | Нас |
+| `Tenure` | Тоон | Банкинд байсан жил |
+| `Balance` | Тоон | Дансны үлдэгдэл |
+| `NumOfProducts` | Тоон | Бүтээгдэхүүний тоо |
+| `HasCrCard` | Хоёртын | Зээлийн карт (0/1) |
+| `IsActiveMember` | Хоёртын | Идэвхтэй гишүүн (0/1) |
+| `EstimatedSalary` | Тоон | Тооцоолсон цалин |
+| **`Exited`** | **Зорилт** | **Гарсан эсэх (0/1)** |
+
+### 2.3 Урьдчилсан шинжилгээ
+
+```{python}
+fig, axes = plt.subplots(1, 2, figsize=(10, 4))
+
+# Churn тархалт
+axes[0].pie(
+    df['Exited'].value_counts(),
+    labels=['Үлдэнэ (0)', 'Гарна (1)'],
+    autopct='%1.1f%%',
+    colors=['#3498db', '#e74c3c'],
+    startangle=90
+)
+axes[0].set_title('Churn тархалт')
+
+# Насны хуваарилалт
+df.groupby('Exited')['Age'].plot(kind='kde', ax=axes[1],
+    color=['#3498db', '#e74c3c'], legend=True)
+axes[1].set_xlabel('Нас')
+axes[1].set_title('Нас vs Churn')
+axes[1].legend(['Үлдэнэ', 'Гарна'])
+
+plt.tight_layout()
+plt.show()
+```
+
+---
+
+## 3. Өгөгдөл боловсруулах
+
+```{python}
+df.drop(columns=['RowNumber', 'CustomerId', 'Surname'], inplace=True)
+df['Gender'] = df['Gender'].map({'Male': 1, 'Female': 0})
+df = pd.get_dummies(df, columns=['Geography'], drop_first=True)
+
+for col in df.select_dtypes(include='bool').columns:
+    df[col] = df[col].astype(int)
+
+X = df.drop('Exited', axis=1).values.astype(float)
+y = df['Exited'].values.astype(int)
+feature_names = list(df.drop('Exited', axis=1).columns)
+
+print("Боловсруулсан баганууд:")
+print(feature_names)
+```
+
+---
+
+## 4. Алгоритмын хэрэгжүүлэлт
+
+### 4.1 Gini Impurity
+
+Тасалгааны цэвэр бус байдлыг хэмжих томьёо:
+
+$$\text{Gini} = 1 - \sum_{i=1}^{C} p_i^2$$
+
+```{python}
+def gini_impurity(y):
+    """Gini = 1 - sum(pi^2)"""
+    n = len(y)
+    if n == 0:
+        return 0.0
+    impurity = 1.0
+    for count in Counter(y).values():
+        p = count / n
+        impurity -= p ** 2
+    return impurity
+
+
+def weighted_gini(y_left, y_right):
+    """Жинлэгдсэн Gini хоёр хүүхэд зангилаанд"""
+    n = len(y_left) + len(y_right)
+    if n == 0:
+        return 0.0
+    return (len(y_left)/n)*gini_impurity(y_left) + \
+           (len(y_right)/n)*gini_impurity(y_right)
+```
+
+### 4.2 Хамгийн сайн хуваалт олох
+
+```{python}
+def best_split(X, y):
+    """Хамгийн бага Weighted Gini өгдөг (feature, threshold) олох"""
+    best_gini, best_feature, best_thresh = float('inf'), None, None
+    for feat_idx in range(X.shape[1]):
+        col = X[:, feat_idx]
+        for thresh in sorted(set(col))[:-1]:
+            mask_l = col <= thresh
+            mask_r = col > thresh
+            if mask_l.sum() == 0 or mask_r.sum() == 0:
+                continue
+            g = weighted_gini(y[mask_l], y[mask_r])
+            if g < best_gini:
+                best_gini, best_feature, best_thresh = g, feat_idx, thresh
+    return best_feature, best_thresh, best_gini
+```
+
+### 4.3 Node ба Decision Tree класс
+
+```{python}
+class Node:
+    def __init__(self, feature_idx=None, threshold=None,
+                 left=None, right=None, value=None,
+                 gini=0.0, n_samples=0, depth=0):
+        self.feature_idx = feature_idx
+        self.threshold   = threshold
+        self.left        = left
+        self.right       = right
+        self.value       = value
+        self.gini        = gini
+        self.n_samples   = n_samples
+        self.depth       = depth
+
+    def is_leaf(self):
+        return self.value is not None
+
+
+class DecisionTreeClassifier:
+    """
+    Decision Tree ангилагч.
+    Алгоритм: Gini Impurity-д суурилсан CART
+    sklearn.tree ашиглахгүй — бүрэн өөрийн хэрэгжүүлэлт.
+    """
+    def __init__(self, max_depth=5, min_samples_split=10, min_samples_leaf=5):
+        self.max_depth          = max_depth
+        self.min_samples_split  = min_samples_split
+        self.min_samples_leaf   = min_samples_leaf
+        self.root               = None
+        self.feature_importances_ = None
+        self._n_features        = 0
+        self._importance_raw    = None
+        self._n_total           = 0
+
+    def fit(self, X, y):
+        X = np.array(X, dtype=float)
+        y = np.array(y, dtype=int)
+        self._n_features     = X.shape[1]
+        self._n_total        = len(y)
+        self._importance_raw = np.zeros(self._n_features)
+        self.root = self._build(X, y, 0)
+        total = self._importance_raw.sum()
+        self.feature_importances_ = (
+            self._importance_raw / total if total > 0
+            else self._importance_raw
+        )
+        return self
+
+    def _build(self, X, y, depth):
+        n         = len(y)
+        node_gini = gini_impurity(y)
+        if depth >= self.max_depth or n < self.min_samples_split or node_gini == 0.0:
+            return Node(value=self._majority(y), gini=node_gini,
+                        n_samples=n, depth=depth)
+        feat_idx, thresh, split_gini = best_split(X, y)
+        if feat_idx is None:
+            return Node(value=self._majority(y), gini=node_gini,
+                        n_samples=n, depth=depth)
+        self._importance_raw[feat_idx] += (node_gini - split_gini) * (n / self._n_total)
+        mask   = X[:, feat_idx] <= thresh
+        X_l, y_l = X[mask],  y[mask]
+        X_r, y_r = X[~mask], y[~mask]
+        if len(y_l) < self.min_samples_leaf or len(y_r) < self.min_samples_leaf:
+            return Node(value=self._majority(y), gini=node_gini,
+                        n_samples=n, depth=depth)
+        return Node(
+            feature_idx=feat_idx, threshold=thresh,
+            left=self._build(X_l, y_l, depth+1),
+            right=self._build(X_r, y_r, depth+1),
+            gini=node_gini, n_samples=n, depth=depth
+        )
+
+    def _majority(self, y):
+        return max(Counter(y), key=Counter(y).get)
+
+    def predict(self, X):
+        X = np.array(X, dtype=float)
+        return np.array([self._walk(x, self.root) for x in X])
+
+    def _walk(self, x, node):
+        if node.is_leaf():
+            return node.value
+        if x[node.feature_idx] <= node.threshold:
+            return self._walk(x, node.left)
+        return self._walk(x, node.right)
+```
+
+---
+
+## 5. Сургах
+
+```{python}
+# Train/Test хуваах (sklearn ашиглахгүй)
+np.random.seed(42)
+idx   = np.random.permutation(len(y))
+split = int(len(y) * 0.8)
+X_train, X_test = X[idx[:split]], X[idx[split:]]
+y_train, y_test = y[idx[:split]], y[idx[split:]]
+
+print(f"Train: {X_train.shape}  churn={y_train.mean()*100:.1f}%")
+print(f"Test : {X_test.shape}   churn={y_test.mean()*100:.1f}%")
+```
+
+```{python}
+#| output: false
+clf = DecisionTreeClassifier(max_depth=5, min_samples_split=20, min_samples_leaf=10)
+clf.fit(X_train, y_train)
+print("Сургалт дууслаа ✓")
+```
+
+---
+
+## 6. Үнэлгээ
+
+### 6.1 Үр дүнгийн хүснэгт
+
+```{python}
+def compute_metrics(y_true, y_pred):
+    tp = sum(1 for a,b in zip(y_true,y_pred) if a==1 and b==1)
+    tn = sum(1 for a,b in zip(y_true,y_pred) if a==0 and b==0)
+    fp = sum(1 for a,b in zip(y_true,y_pred) if a==0 and b==1)
+    fn = sum(1 for a,b in zip(y_true,y_pred) if a==1 and b==0)
+    n    = tp+tn+fp+fn
+    acc  = (tp+tn)/n             if n>0          else 0
+    prec = tp/(tp+fp)            if (tp+fp)>0    else 0
+    rec  = tp/(tp+fn)            if (tp+fn)>0    else 0
+    f1   = 2*prec*rec/(prec+rec) if (prec+rec)>0 else 0
+    return dict(TP=tp, TN=tn, FP=fp, FN=fn,
+                Accuracy=round(acc,4), Precision=round(prec,4),
+                Recall=round(rec,4), F1=round(f1,4))
+
+y_pred_train = clf.predict(X_train)
+y_pred_test  = clf.predict(X_test)
+
+train_m = compute_metrics(y_train, y_pred_train)
+test_m  = compute_metrics(y_test,  y_pred_test)
+
+results = pd.DataFrame([train_m, test_m], index=['Train','Test'])
+results
+```
+
+```{python}
+diff = train_m['Accuracy'] - test_m['Accuracy']
+status = "⚠️ Overfit!" if diff > 0.05 else "✅ Хэвийн"
+print(f"Overfitting зөрүү: {diff:.4f}  {status}")
+```
+
+### 6.2 Confusion Matrix
+
+```{python}
+m = test_m
+cm = np.array([[m['TN'], m['FP']], [m['FN'], m['TP']]])
+
+fig, ax = plt.subplots(figsize=(5, 4))
+sns.heatmap(cm, annot=True, fmt='d', cmap='Blues', ax=ax,
+            xticklabels=['Үлдэнэ','Гарна'],
+            yticklabels=['Үлдэнэ','Гарна'])
+ax.set_title('Confusion Matrix (Test)')
+ax.set_ylabel('Бодит')
+ax.set_xlabel('Таамагласан')
+plt.tight_layout()
+plt.show()
+```
+
+### 6.3 Feature Importance
+
+```{python}
+feat_df = pd.DataFrame({
+    'Feature': feature_names,
+    'Importance': clf.feature_importances_
+}).sort_values('Importance', ascending=False).reset_index(drop=True)
+
+colors = ['#1d9e75' if i < 3 else '#aaaaaa' for i in range(len(feat_df))]
+fig, ax = plt.subplots(figsize=(9, 5))
+ax.barh(feat_df['Feature'], feat_df['Importance'], color=colors)
+ax.invert_yaxis()
+ax.set_title('Feature Importance (Gini-based)')
+ax.set_xlabel('Importance score')
+for i, v in enumerate(feat_df['Importance']):
+    ax.text(v+0.002, i, f'{v:.3f}', va='center', fontsize=9)
+plt.tight_layout()
+plt.show()
+
+print(f"\nХамгийн чухал feature: '{feat_df.iloc[0]['Feature']}'")
+```
+
+---
+
+## 7. Шинэ харилцагч таамаглах
+
+```{python}
+new_customers = np.array([
+    [620, 1, 45, 3, 120000, 1, 1, 0, 80000,  1, 0],
+    [750, 0, 32, 8, 0,      2, 1, 1, 120000, 0, 0],
+    [580, 0, 50, 2, 85000,  1, 0, 0, 60000,  1, 0],
+], dtype=float)
+
+labels = ["Өндөр эрсдэлтэй", "Тогтвортой", "Дунд эрсдэлтэй"]
+
+results_new = []
+for row, lbl in zip(new_customers, labels):
+    pred = clf._walk(row, clf.root)
+    results_new.append({
+        'Харилцагч': lbl,
+        'Таамаглал': '🔴 ГАРНА' if pred == 1 else '🟢 ҮЛДЭНЭ',
+        'Утга': pred
+    })
+
+pd.DataFrame(results_new)[['Харилцагч','Таамаглал']]
+```
+
+---
+
+## 8. Дүгнэлт
+
+::: {.callout-tip title="Гол үр дүн"}
+- `sklearn` **огт ашиглалгүйгээр** Decision Tree амжилттай хэрэгжүүлсэн
+- Хамгийн чухал feature: **`Age`** — харилцагчийн нас churn-д хамгийн их нөлөөтэй
+- Test Accuracy ~**86%** орчим хүрдэг
+:::
+
+::: {.callout-warning title="Анхаарах зүйл"}
+Загварыг сайжруулахын тулд Random Forest эсвэл XGBoost ашиглах нь илүү үр дүнтэй. Гэхдээ энэ кодын зорилго нь алгоритмыг **ойлгох** явдал.
+:::
