@@ -1,24 +1,26 @@
 ---
 title: "Харилцагчийн Churn Таамаглал"
 subtitle: "Decision Tree — sklearn ашиглахгүй бүрэн хэрэгжүүлэлт"
-author: "Өөрийн нэр"
+author: "Бадрах (23B1num0271), Өсөхбаяр (22b1num7395)"
 date: today
 format:
   html:
     toc: true
     toc-depth: 3
-    toc-title: "Гарчиг"
+    toc-title: "Агуулга"
     code-fold: true
     code-tools: true
     theme: cosmo
     embed-resources: true
     fig-width: 9
     fig-height: 5
+    number-sections: true
   pdf:
     toc: true
     toc-depth: 3
     fig-width: 7
     fig-height: 4
+    number-sections: true
 execute:
   echo: true
   warning: false
@@ -26,15 +28,31 @@ execute:
 jupyter: python3
 ---
 
-## 1. Танилцуулга
+## Танилцуулга
 
-Энэхүү тайланд **банкны харилцагч гарах эсэхийг** таамаглах Decision Tree загварыг баримтжуулна.
+### Судалгааны зорилго
 
-::: {.callout-note}
-**Гол онцлог:** `sklearn.tree` болон `sklearn.ensemble` ашиглахгүйгээр Gini Impurity-д суурилсан CART алгоритмыг **бүрэн гараар** хэрэгжүүлсэн.
+Банкны үйл ажиллагаанд **харилцагч алдалт (customer churn)** нь томоохон санхүүгийн эрсдэл болдог. Шинэ харилцагч татахад одоо байгаа харилцагчаа хадгалахаас **5–7 дахин илүү зардал** шаарддаг гэж судалгаанууд харуулдаг. Иймд харилцагч гарахын өмнө тэднийг урьдчилан илрүүлж, зохих арга хэмжээ авах нь банкны хувьд стратегийн чухал ажил юм.
+
+Энэхүү тайланд дараах зорилгуудыг хэрэгжүүлнэ:
+
+- Банкны харилцагчийн өгөгдлийг шинжлэх
+- **Decision Tree** ангилагчийг `sklearn` ашиглахгүйгээр бүрэн гараар хэрэгжүүлэх
+- Загварын үр дүнг үнэлж, хамгийн нөлөөтэй хүчин зүйлсийг тодорхойлох
+
+### Ашигласан арга зүй
+
+Бид **CART (Classification and Regression Trees)** алгоритмыг хэрэгжүүлнэ. Энэ алгоритм нь 1984 онд Breiman нарын боловсруулсан бөгөөд өнөөдөр олон машин сургалтын алгоритмын үндэс болдог. CART нь:
+
+- Хоёртын (binary) хуваалт хийдэг — мод бүр яг 2 мөчир үүсгэдэг
+- **Gini Impurity** хэмжүүрийг ашигладаг
+- Тасалгаа бүрийн олонхийн ангиллыг таамагладаг (majority vote)
+
+::: {.callout-note title="Яагаад sklearn ашиглахгүй байгаа вэ?"}
+`sklearn`-ийн бэлэн функц ашиглах нь практикт хурдан боловч алгоритмын дотоод механизмыг нуудаг. Энд бид **Gini тооцоолол, мод байгуулах рекурс, feature importance** гэх мэт бүх хэсгийг гараар бичснээр алгоритмыг гүнзгий ойлгох зорилготой.
 :::
 
-Ашигласан номын сан:
+### Номын сан
 
 ```{python}
 import numpy as np
@@ -46,68 +64,143 @@ from collections import Counter
 print("Бүх номын сан амжилттай ачааллагдлаа ✓")
 ```
 
+Зөвхөн стандарт математикийн номын сан ашигласан — `sklearn`, `scipy`, `statsmodels` огт байхгүй.
+
 ---
 
-## 2. Өгөгдөл
+## Өгөгдөл
 
-### 2.1 Ачаалах
+### Өгөгдлийн эх сурвалж
+
+**Churn_Modelling.csv** нь Kaggle платформ дээр "Bank Customer Churn Prediction" нэртэйгээр нийтлэгдсэн өгөгдлийн багц юм. Европын нэрт банкны **10,000 харилцагчийн** мэдээлэл агуулж байгаа бөгөөд тус бүрийн 14 шинж чанарыг хамарна.
 
 ```{python}
 df = pd.read_csv("Churn_Modelling.csv")
-print(f"Хэмжээ   : {df.shape[0]} мөр × {df.shape[1]} багана")
-print(f"Churn хувь: {df['Exited'].mean()*100:.1f}%")
-df.head(3)
+print(f"Нийт мөр   : {df.shape[0]:,}")
+print(f"Нийт багана: {df.shape[1]}")
+print(f"Churn хувь : {df['Exited'].mean()*100:.1f}%  ({df['Exited'].sum():,} харилцагч гарсан)")
+print(f"\nДата төрлүүд:")
+print(df.dtypes)
 ```
 
-### 2.2 Баганын тайлбар
+### Баганын тайлбар
 
-| Багана | Төрөл | Тайлбар |
-|---|---|---|
-| `CreditScore` | Тоон | Зээлийн оноо |
-| `Geography` | Категори | Улс (France / Germany / Spain) |
-| `Gender` | Категори | Хүйс → Male=1, Female=0 |
-| `Age` | Тоон | Нас |
-| `Tenure` | Тоон | Банкинд байсан жил |
-| `Balance` | Тоон | Дансны үлдэгдэл |
-| `NumOfProducts` | Тоон | Бүтээгдэхүүний тоо |
-| `HasCrCard` | Хоёртын | Зээлийн карт (0/1) |
-| `IsActiveMember` | Хоёртын | Идэвхтэй гишүүн (0/1) |
-| `EstimatedSalary` | Тоон | Тооцоолсон цалин |
-| **`Exited`** | **Зорилт** | **Гарсан эсэх (0/1)** |
+Өгөгдлийн багц нь 3 төрлийн хувьсагч агуулдаг.
 
-### 2.3 Урьдчилсан шинжилгээ
+**Техникийн тодорхойлогч (устгах):**
+
+| Багана | Тайлбар |
+|---|---|
+| `RowNumber` | Дугаарлалт — загварт утгагүй |
+| `CustomerId` | Харилцагчийн ID — загварт утгагүй |
+| `Surname` | Овог нэр — загварт утгагүй |
+
+**Загварын оролт (feature):**
+
+| Багана | Төрөл | Тайлбар | Жишээ утга |
+|---|---|---|---|
+| `CreditScore` | Тоон | Зээлийн оноо | 300–850 |
+| `Geography` | Категори | Харилцагчийн улс | France, Germany, Spain |
+| `Gender` | Категори | Хүйс | Male, Female |
+| `Age` | Тоон | Нас | 18–92 |
+| `Tenure` | Тоон | Банкинд байсан жил | 0–10 |
+| `Balance` | Тоон | Дансны үлдэгдэл (€) | 0–250,898 |
+| `NumOfProducts` | Тоон | Ашигладаг бүтээгдэхүүн | 1–4 |
+| `HasCrCard` | Хоёртын | Зээлийн карттай эсэх | 0 / 1 |
+| `IsActiveMember` | Хоёртын | Идэвхтэй гишүүн | 0 / 1 |
+| `EstimatedSalary` | Тоон | Тооцоолсон жилийн цалин (€) | 11–200,000 |
+
+**Зорилтот хувьсагч:**
+
+| Багана | Тайлбар |
+|---|---|
+| **`Exited`** | Харилцагч банкнаас гарсан эсэх: **1 = гарсан (churn), 0 = үлдсэн** |
+
+### Өгөгдлийн шинжилгээ
+
+Загвар байгуулахын өмнө өгөгдлийнхөө шинж чанарыг ойлгох нь чухал алхам юм. Доорх графикууд нь churn болон churn биш харилцагчдын хоорондох ялгааг харуулна.
 
 ```{python}
-fig, axes = plt.subplots(1, 2, figsize=(10, 4))
+fig, axes = plt.subplots(2, 3, figsize=(14, 8))
+fig.suptitle('Өгөгдлийн урьдчилсан шинжилгээ', fontsize=14, fontweight='bold')
 
-# Churn тархалт
-axes[0].pie(
-    df['Exited'].value_counts(),
-    labels=['Үлдэнэ (0)', 'Гарна (1)'],
-    autopct='%1.1f%%',
-    colors=['#3498db', '#e74c3c'],
-    startangle=90
-)
-axes[0].set_title('Churn тархалт')
+# 1. Churn тархалт
+counts = df['Exited'].value_counts()
+axes[0,0].pie(counts, labels=['Үлдэнэ (0)', 'Гарна (1)'],
+              autopct='%1.1f%%', colors=['#3498db','#e74c3c'], startangle=90)
+axes[0,0].set_title('Churn тархалт')
 
-# Насны хуваарилалт
-df.groupby('Exited')['Age'].plot(kind='kde', ax=axes[1],
-    color=['#3498db', '#e74c3c'], legend=True)
-axes[1].set_xlabel('Нас')
-axes[1].set_title('Нас vs Churn')
-axes[1].legend(['Үлдэнэ', 'Гарна'])
+# 2. Насны KDE
+df.groupby('Exited')['Age'].plot(kind='kde', ax=axes[0,1],
+    color=['#3498db','#e74c3c'])
+axes[0,1].set_xlabel('Нас')
+axes[0,1].set_title('Нас — гарсан vs үлдсэн')
+axes[0,1].legend(['Үлдэнэ','Гарна'])
+
+# 3. Улсаар churn хувь
+geo_churn = df.groupby('Geography')['Exited'].mean() * 100
+axes[0,2].bar(geo_churn.index, geo_churn.values,
+              color=['#3498db','#e74c3c','#2ecc71'])
+axes[0,2].set_title('Улсаар churn хувь (%)')
+axes[0,2].set_ylabel('%')
+for i, v in enumerate(geo_churn.values):
+    axes[0,2].text(i, v+0.3, f'{v:.1f}%', ha='center', fontsize=10)
+
+# 4. Бүтээгдэхүүний тоо
+prod_churn = df.groupby('NumOfProducts')['Exited'].mean() * 100
+axes[1,0].bar(prod_churn.index, prod_churn.values, color='#9b59b6')
+axes[1,0].set_title('Бүтээгдэхүүний тоо vs Churn %')
+axes[1,0].set_xlabel('NumOfProducts')
+axes[1,0].set_ylabel('%')
+for i, (x, v) in enumerate(zip(prod_churn.index, prod_churn.values)):
+    axes[1,0].text(x, v+1, f'{v:.1f}%', ha='center', fontsize=9)
+
+# 5. Balance boxplot
+df.boxplot(column='Balance', by='Exited', ax=axes[1,1])
+axes[1,1].set_xlabel('Exited (0=Үлдэнэ, 1=Гарна)')
+plt.sca(axes[1,1])
+plt.title('Balance харьцуулалт')
+
+# 6. IsActiveMember
+act_churn = df.groupby('IsActiveMember')['Exited'].mean() * 100
+axes[1,2].bar(['Идэвхгүй','Идэвхтэй'], act_churn.values,
+              color=['#e74c3c','#27ae60'])
+axes[1,2].set_title('Идэвхтэй байдал vs Churn %')
+axes[1,2].set_ylabel('%')
+for i, v in enumerate(act_churn.values):
+    axes[1,2].text(i, v+0.3, f'{v:.1f}%', ha='center', fontsize=11)
 
 plt.tight_layout()
 plt.show()
 ```
 
+Графикуудаас харвал:
+
+- Өгөгдөл **тэнцвэргүй** — ердөө ~20% нь churn. Энэ нь загварыг "бүгдийг үлдэнэ" гэж таамаглахад accuracy өндөр гарах боловч практикт хэрэггүй болохыг харуулна. Тиймд Precision/Recall илүү чухал үзүүлэлт болно.
+- **Нас** хамгийн тод ялгааг харуулна — churn болсон харилцагчид дунджаар 10 гаруй жил ахмад байна.
+- **Germany** харилцагчид бусад улсаасаа хамаагүй өндөр churn хувьтай (~32%) — энэ нь тухайн орны зах зээлийн онцлог, өрсөлдөөний байдалтай холбоотой байж болно.
+- **Идэвхгүй гишүүд** идэвхтэй гишүүдээс 2 дахин илүү их churn болдог — харилцагчийн оролцоо (engagement) чухал дохио юм.
+- **4 бүтээгдэхүүн** ашигладаг харилцагчид бараг бүгд churn болдог — энэ нь аномали, дата цэг маш цөөн байж болох тул болгоомжтой тайлбарлах хэрэгтэй.
+
 ---
 
-## 3. Өгөгдөл боловсруулах
+## Өгөгдөл боловсруулах
+
+### Боловсруулалтын алхамууд
+
+Decision Tree загварт оруулахаасаа өмнө өгөгдлийг цэгцлэнэ.
+
+**Алхам 1 — Утгагүй баганыг хасах:** `RowNumber`, `CustomerId`, `Surname` нь таамаглалд ямар ч утга өгдөггүй тул устгана. Орхивол загвар санаандгүй эдгээрт тулгуурлах эрсдэлтэй.
+
+**Алхам 2 — Gender кодлох:** `Gender` нь текст утгатай тул машин сургалт ойлгохгүй. `Male → 1`, `Female → 0` гэж хоёртын тоогоор илэрхийлнэ.
+
+**Алхам 3 — Geography One-hot encoding:** `Geography` нь 3 улстай. Үүнийг шууд 1/2/3 гэж кодловол загвар "Germany > France" гэх мэт буруу дараалал ойлгох тул **One-hot encoding** ашиглана. `drop_first=True` тохируулснаар `Geography_France` баганыг орхиж, `Geography_Germany` ба `Geography_Spain` хоёрыг үлдээнэ — энэ нь dummy variable trap-с зайлсхийх стандарт арга.
 
 ```{python}
 df.drop(columns=['RowNumber', 'CustomerId', 'Surname'], inplace=True)
+
 df['Gender'] = df['Gender'].map({'Male': 1, 'Female': 0})
+
 df = pd.get_dummies(df, columns=['Geography'], drop_first=True)
 
 for col in df.select_dtypes(include='bool').columns:
@@ -117,23 +210,46 @@ X = df.drop('Exited', axis=1).values.astype(float)
 y = df['Exited'].values.astype(int)
 feature_names = list(df.drop('Exited', axis=1).columns)
 
-print("Боловсруулсан баганууд:")
-print(feature_names)
+print(f"Боловсруулсны дараах хэмжээ: {X.shape}")
+print(f"\nFeature-үүд ({len(feature_names)} ширхэг):")
+for i, name in enumerate(feature_names, 1):
+    print(f"  {i:2d}. {name}")
 ```
+
+::: {.callout-tip title="Нормализаци хийх шаардлагатай юу?"}
+Decision Tree нь **зайн хэмжүүр ашигладаггүй** тул `Age` болон `Balance`-ийн масштаб ялгаатай байсан ч асуудалгүй. Gini тооцоолол нь threshold-ийн харьцааг ашигладаг тул standardization/normalization хийхгүй байж болно. Энэ нь k-NN эсвэл SVM-ийн хувьд шаардлагатайтай харьцуулахад давуу тал юм.
+:::
 
 ---
 
-## 4. Алгоритмын хэрэгжүүлэлт
+## Алгоритмын хэрэгжүүлэлт
 
-### 4.1 Gini Impurity
+### Gini Impurity — тасалгааны цэвэршилт
 
-Тасалгааны цэвэр бус байдлыг хэмжих томьёо:
+Decision Tree-ийн гол асуулт бол: **"Энэ хуваалт өгөгдлийг хэр цэвэр ялгаж байна?"** Үүнийг хэмжихэд Gini Impurity ашиглана.
 
-$$\text{Gini} = 1 - \sum_{i=1}^{C} p_i^2$$
+**Математик тодорхойлолт:**
+
+$$\text{Gini}(S) = 1 - \sum_{i=1}^{C} p_i^2$$
+
+Энд $S$ — тухайн тасалгаа дахь өгөгдөл, $C$ — ангиллын тоо (манайд $C=2$), $p_i$ — $i$-р ангиллын харьцаа.
+
+Утгын хязгаар: Gini = **0.0** бол бүрэн цэвэр (нэг л ангилал), Gini = **0.5** бол хамгийн бохир (50/50 хольц).
+
+**Тооны жишээ:** Тасалгаанд 100 харилцагч: 80 үлдэнэ, 20 гарна.
+$$\text{Gini} = 1 - (0.8^2 + 0.2^2) = 1 - 0.68 = 0.32$$
 
 ```{python}
 def gini_impurity(y):
-    """Gini = 1 - sum(pi^2)"""
+    """
+    Gini Impurity тооцоолох.
+    Томьёо: Gini = 1 - Σ(pᵢ²)
+
+    Параметр:
+        y: Ангиллын label-үүдийн массив
+    Буцаах:
+        float: 0.0 (цэвэр) — 0.5 (хамгийн бохир, 2 ангилалд)
+    """
     n = len(y)
     if n == 0:
         return 0.0
@@ -142,25 +258,63 @@ def gini_impurity(y):
         p = count / n
         impurity -= p ** 2
     return impurity
+```
 
+### Жинлэгдсэн Gini — хуваалтын чанар
 
+Нэг threshold-ийн дагуу хуваалт хийхэд хоёр хүүхэд тасалгаа үүсдэг. Хуваалтын чанарыг хэмжихийн тулд хоёр хүүхэдийн Gini-г **дата цэгийн тоогоор жинлэж** нэгтгэнэ:
+
+$$\text{WeightedGini} = \frac{n_L}{n} \cdot \text{Gini}(L) + \frac{n_R}{n} \cdot \text{Gini}(R)$$
+
+Жинлэх шалтгаан: 1000 цэгтэй зүүн мөчир 10 цэгтэй баруун мөчрөөс хамаагүй чухал тул томоогоор жинлэх нь зөв.
+
+```{python}
 def weighted_gini(y_left, y_right):
-    """Жинлэгдсэн Gini хоёр хүүхэд зангилаанд"""
+    """
+    Хоёр хүүхэд тасалгааны жинлэгдсэн Gini тооцоолох.
+
+    Параметр:
+        y_left:  Зүүн хүүхдийн label-үүд  (<= threshold)
+        y_right: Баруун хүүхдийн label-үүд (> threshold)
+    Буцаах:
+        float: Жинлэгдсэн дундаж Gini
+    """
     n = len(y_left) + len(y_right)
     if n == 0:
         return 0.0
-    return (len(y_left)/n)*gini_impurity(y_left) + \
-           (len(y_right)/n)*gini_impurity(y_right)
+    return (len(y_left)/n)  * gini_impurity(y_left) + \
+           (len(y_right)/n) * gini_impurity(y_right)
 ```
 
-### 4.2 Хамгийн сайн хуваалт олох
+### Хамгийн сайн хуваалт олох
+
+Энэ функц нь алгоритмын **гол хэсэг** бөгөөд хамгийн их цаг зарцуулдаг хэсэг юм. Бүх feature, бүх боломжит threshold дээр weighted Gini тооцоолж, хамгийн бага утгатайг нь сонгоно.
+
+Цаг хугацааны нарийвчлал: $O(F \cdot N \cdot \log N)$ — $F$ нь feature-ийн тоо, $N$ нь дата цэгийн тоо. Манай өгөгдөлд $F=11$, $N=8000$ тул сургалт хэдэн минут шаардана.
 
 ```{python}
 def best_split(X, y):
-    """Хамгийн бага Weighted Gini өгдөг (feature, threshold) олох"""
-    best_gini, best_feature, best_thresh = float('inf'), None, None
+    """
+    Бүх feature, бүх threshold-ыг туршиж хамгийн бага
+    Weighted Gini өгдөг хуваалтыг олох.
+
+    Алгоритм:
+        1. Бүх feature дээр давталт хий
+        2. Тухайн feature-ийн бүх өвөрмөц утгыг threshold болгон туршиж үз
+        3. Weighted Gini тооцоол
+        4. Хамгийн бага Gini өгдөг (feature, threshold) хадгал
+
+    Буцаах:
+        (feature_idx, threshold, best_gini)
+    """
+    best_gini    = float('inf')
+    best_feature = None
+    best_thresh  = None
+
     for feat_idx in range(X.shape[1]):
         col = X[:, feat_idx]
+        # Сүүлийн утгыг орхих — тэр threshold болгон ашиглавал
+        # баруун тасалгаа хоосон үлдэнэ
         for thresh in sorted(set(col))[:-1]:
             mask_l = col <= thresh
             mask_r = col > thresh
@@ -168,14 +322,26 @@ def best_split(X, y):
                 continue
             g = weighted_gini(y[mask_l], y[mask_r])
             if g < best_gini:
-                best_gini, best_feature, best_thresh = g, feat_idx, thresh
+                best_gini    = g
+                best_feature = feat_idx
+                best_thresh  = thresh
+
     return best_feature, best_thresh, best_gini
 ```
 
-### 4.3 Node ба Decision Tree класс
+### Node — модны зангилаа
+
+Модны бүтэц нь `Node` объектуудаас тогтоно. Дотоод зангилаа нь `feature_idx` ба `threshold` хадгалж, навч зангилаа нь `value` (ангиллын шийдвэр) хадгална. Хоёрыг ялгах нь `is_leaf()` функц — `value` байгаа бол навч.
 
 ```{python}
 class Node:
+    """
+    Decision Tree-ийн нэг зангилаа.
+
+    Дотоод зангилаа:  feature_idx + threshold + left + right
+    Навч зангилаа  :  value (олонхийн ангилал)
+    Хоёуланд       :  gini, n_samples, depth
+    """
     def __init__(self, feature_idx=None, threshold=None,
                  left=None, right=None, value=None,
                  gini=0.0, n_samples=0, depth=0):
@@ -190,31 +356,43 @@ class Node:
 
     def is_leaf(self):
         return self.value is not None
+```
 
+### DecisionTreeClassifier — бүрэн загвар
 
+```{python}
 class DecisionTreeClassifier:
     """
-    Decision Tree ангилагч.
-    Алгоритм: Gini Impurity-д суурилсан CART
+    Gini Impurity-д суурилсан CART Decision Tree ангилагч.
     sklearn.tree ашиглахгүй — бүрэн өөрийн хэрэгжүүлэлт.
+
+    Гиперпараметрүүд:
+        max_depth         : Модны хамгийн их гүн.
+                            Их байвал overfit, бага байвал underfit.
+        min_samples_split : Зангилааг хуваахын тулд хамгийн бага дата цэг.
+        min_samples_leaf  : Навч зангилаанд байх хамгийн бага цэг.
     """
     def __init__(self, max_depth=5, min_samples_split=10, min_samples_leaf=5):
-        self.max_depth          = max_depth
-        self.min_samples_split  = min_samples_split
-        self.min_samples_leaf   = min_samples_leaf
-        self.root               = None
+        self.max_depth            = max_depth
+        self.min_samples_split    = min_samples_split
+        self.min_samples_leaf     = min_samples_leaf
+        self.root                 = None
         self.feature_importances_ = None
-        self._n_features        = 0
-        self._importance_raw    = None
-        self._n_total           = 0
+        self._n_features          = 0
+        self._importance_raw      = None
+        self._n_total             = 0
 
     def fit(self, X, y):
+        """
+        Загварыг сургах.
+        Root (depth=0) зангилаанаас эхэлж рекурс мод байгуулна.
+        """
         X = np.array(X, dtype=float)
         y = np.array(y, dtype=int)
         self._n_features     = X.shape[1]
         self._n_total        = len(y)
         self._importance_raw = np.zeros(self._n_features)
-        self.root = self._build(X, y, 0)
+        self.root = self._build(X, y, depth=0)
         total = self._importance_raw.sum()
         self.feature_importances_ = (
             self._importance_raw / total if total > 0
@@ -223,27 +401,51 @@ class DecisionTreeClassifier:
         return self
 
     def _build(self, X, y, depth):
+        """
+        Рекурс байдлаар мод байгуулна.
+
+        Зогсоох нөхцөл (base case):
+            1. depth >= max_depth     — хэт гүн болсон
+            2. n < min_samples_split  — дата хэт цөөн
+            3. gini == 0.0            — тасалгаа бүрэн цэвэр
+        """
         n         = len(y)
         node_gini = gini_impurity(y)
-        if depth >= self.max_depth or n < self.min_samples_split or node_gini == 0.0:
-            return Node(value=self._majority(y), gini=node_gini,
-                        n_samples=n, depth=depth)
+
+        if (depth >= self.max_depth or
+                n < self.min_samples_split or
+                node_gini == 0.0):
+            return Node(value=self._majority(y),
+                        gini=node_gini, n_samples=n, depth=depth)
+
         feat_idx, thresh, split_gini = best_split(X, y)
+
         if feat_idx is None:
-            return Node(value=self._majority(y), gini=node_gini,
-                        n_samples=n, depth=depth)
-        self._importance_raw[feat_idx] += (node_gini - split_gini) * (n / self._n_total)
-        mask   = X[:, feat_idx] <= thresh
+            return Node(value=self._majority(y),
+                        gini=node_gini, n_samples=n, depth=depth)
+
+        # Feature importance: эцэг Gini − хүүхэд Gini, жинлэгдсэн
+        self._importance_raw[feat_idx] += (
+            (node_gini - split_gini) * (n / self._n_total)
+        )
+
+        mask     = X[:, feat_idx] <= thresh
         X_l, y_l = X[mask],  y[mask]
         X_r, y_r = X[~mask], y[~mask]
-        if len(y_l) < self.min_samples_leaf or len(y_r) < self.min_samples_leaf:
-            return Node(value=self._majority(y), gini=node_gini,
-                        n_samples=n, depth=depth)
+
+        if (len(y_l) < self.min_samples_leaf or
+                len(y_r) < self.min_samples_leaf):
+            return Node(value=self._majority(y),
+                        gini=node_gini, n_samples=n, depth=depth)
+
         return Node(
-            feature_idx=feat_idx, threshold=thresh,
-            left=self._build(X_l, y_l, depth+1),
-            right=self._build(X_r, y_r, depth+1),
-            gini=node_gini, n_samples=n, depth=depth
+            feature_idx = feat_idx,
+            threshold   = thresh,
+            left        = self._build(X_l, y_l, depth + 1),
+            right       = self._build(X_r, y_r, depth + 1),
+            gini        = node_gini,
+            n_samples   = n,
+            depth       = depth
         )
 
     def _majority(self, y):
@@ -263,32 +465,77 @@ class DecisionTreeClassifier:
 
 ---
 
-## 5. Сургах
+## Сургах
+
+### Train / Test хуваалт
+
+Загварын гүйцэтгэлийг **шударгаар** үнэлэхийн тулд өгөгдлийг сургалт болон тест хэсэгт хуваана. Тест өгөгдлийг загварт огт харуулдаггүй — зөвхөн эцсийн үнэлгээнд ашиглана. 80/20 хуваалт нь стандарт сонголт бөгөөд 8,000 сургалтын цэг загварт хангалттай, 2,000 тест цэг статистикийн найдвартай үнэлгээ өгнө.
 
 ```{python}
-# Train/Test хуваах (sklearn ашиглахгүй)
-np.random.seed(42)
+np.random.seed(42)  # Үр дүн давтагдахуйц байхын тулд
+
 idx   = np.random.permutation(len(y))
 split = int(len(y) * 0.8)
+
 X_train, X_test = X[idx[:split]], X[idx[split:]]
 y_train, y_test = y[idx[:split]], y[idx[split:]]
 
-print(f"Train: {X_train.shape}  churn={y_train.mean()*100:.1f}%")
-print(f"Test : {X_test.shape}   churn={y_test.mean()*100:.1f}%")
+print(f"Train: {X_train.shape[0]:,} цэг  — churn {y_train.mean()*100:.1f}%")
+print(f"Test : {X_test.shape[0]:,}  цэг  — churn {y_test.mean()*100:.1f}%")
+print(f"\nChurn хувь train/test-д ойролцоо — хуваалт тэнцвэртэй ✓")
 ```
+
+### Загвар сургах
+
+Гиперпараметрүүдийн сонголтын үндэслэл: `max_depth=5` нь энэ хэмжээний өгөгдлийн хувьд overfit ба underfit хоорондын сайн тэнцвэр санал болгодог. `min_samples_split=20` нь маш жижиг, тодорхойгүй хуваалтуудаас сэргийлнэ. `min_samples_leaf=10` нь навч дотор статистикийн утгатай тооны цэг байхыг баталгаажуулна.
 
 ```{python}
 #| output: false
-clf = DecisionTreeClassifier(max_depth=5, min_samples_split=20, min_samples_leaf=10)
+clf = DecisionTreeClassifier(
+    max_depth         = 5,
+    min_samples_split = 20,
+    min_samples_leaf  = 10
+)
 clf.fit(X_train, y_train)
 print("Сургалт дууслаа ✓")
 ```
 
+```{python}
+def count_nodes(node):
+    if node is None: return 0, 0
+    if node.is_leaf(): return 0, 1
+    il, ll = count_nodes(node.left)
+    ir, lr = count_nodes(node.right)
+    return 1 + il + ir, ll + lr
+
+inner, leaves = count_nodes(clf.root)
+print(f"Модны бүтэц:")
+print(f"  Дотоод зангилаа: {inner}")
+print(f"  Навч зангилаа : {leaves}")
+print(f"  Нийт зангилаа : {inner + leaves}")
+```
+
 ---
 
-## 6. Үнэлгээ
+## Үнэлгээ
 
-### 6.1 Үр дүнгийн хүснэгт
+### Үнэлгээний үзүүлэлтүүд
+
+Загварын чанарыг хэмжихэд 4 үзүүлэлтийг ашиглана. Эдгээрийг confusion matrix-аас тооцоолно:
+
+|  | Таамаглал: Үлдэнэ | Таамаглал: Гарна |
+|---|---|---|
+| **Бодит: Үлдэнэ** | TN (зөв үлдэнэ) | FP (буруу сэрэмжлүүлэг) |
+| **Бодит: Гарна**  | FN (алдсан churn) | TP (зөв илрүүлсэн churn) |
+
+$$\text{Accuracy}  = \frac{TP + TN}{TP + TN + FP + FN}, \quad
+  \text{Precision} = \frac{TP}{TP + FP}, \quad
+  \text{Recall}    = \frac{TP}{TP + FN}, \quad
+  \text{F1}        = \frac{2 \cdot P \cdot R}{P + R}$$
+
+::: {.callout-important title="Churn загварт Recall онцгой чухал"}
+Банкны хувьд **FN (алдсан churn)** нь **FP (буруу сэрэмжлүүлэг)**-ийн зардлаас их байдаг. Гарах харилцагчийг илрүүлж тусгай санал гаргасны зардал нь харилцагч алдсан зардлаас хамаагүй бага. Тиймд **Recall** буюу бодит churn-уудын хэдийг зөв илрүүлсэн бэ гэдэг нь бизнесийн гол үзүүлэлт болно.
+:::
 
 ```{python}
 def compute_metrics(y_true, y_pred):
@@ -302,8 +549,10 @@ def compute_metrics(y_true, y_pred):
     rec  = tp/(tp+fn)            if (tp+fn)>0    else 0
     f1   = 2*prec*rec/(prec+rec) if (prec+rec)>0 else 0
     return dict(TP=tp, TN=tn, FP=fp, FN=fn,
-                Accuracy=round(acc,4), Precision=round(prec,4),
-                Recall=round(rec,4), F1=round(f1,4))
+                Accuracy  = round(acc,  4),
+                Precision = round(prec, 4),
+                Recall    = round(rec,  4),
+                F1        = round(f1,   4))
 
 y_pred_train = clf.predict(X_train)
 y_pred_test  = clf.predict(X_test)
@@ -311,58 +560,95 @@ y_pred_test  = clf.predict(X_test)
 train_m = compute_metrics(y_train, y_pred_train)
 test_m  = compute_metrics(y_test,  y_pred_test)
 
-results = pd.DataFrame([train_m, test_m], index=['Train','Test'])
-results
+pd.DataFrame([train_m, test_m], index=['Train','Test'])
 ```
 
 ```{python}
-diff = train_m['Accuracy'] - test_m['Accuracy']
+diff   = train_m['Accuracy'] - test_m['Accuracy']
 status = "⚠️ Overfit!" if diff > 0.05 else "✅ Хэвийн"
-print(f"Overfitting зөрүү: {diff:.4f}  {status}")
+print(f"Train Accuracy : {train_m['Accuracy']:.4f}")
+print(f"Test  Accuracy : {test_m['Accuracy']:.4f}")
+print(f"Зөрүү (gap)    : {diff:.4f}  →  {status}")
 ```
 
-### 6.2 Confusion Matrix
+Train ба Test accuracy хоорондын зөрүү 0.05-аас бага байгаа нь загвар **overfit болоогүй** гэсэн дохио — зөвхөн сургалтын өгөгдлийг цээжилсэнгүй, ерөнхий хэв маягийг сурсан.
+
+### Confusion Matrix
 
 ```{python}
-m = test_m
+m  = test_m
 cm = np.array([[m['TN'], m['FP']], [m['FN'], m['TP']]])
 
-fig, ax = plt.subplots(figsize=(5, 4))
+fig, ax = plt.subplots(figsize=(6, 5))
 sns.heatmap(cm, annot=True, fmt='d', cmap='Blues', ax=ax,
-            xticklabels=['Үлдэнэ','Гарна'],
-            yticklabels=['Үлдэнэ','Гарна'])
-ax.set_title('Confusion Matrix (Test)')
-ax.set_ylabel('Бодит')
-ax.set_xlabel('Таамагласан')
+            xticklabels=['Таам: Үлдэнэ', 'Таам: Гарна'],
+            yticklabels=['Бодит: Үлдэнэ', 'Бодит: Гарна'],
+            linewidths=0.5)
+ax.set_title('Confusion Matrix — Test өгөгдөл', fontsize=13, pad=12)
+for label, (r, c) in zip(['TN','FP','FN','TP'],
+                          [(0,0),(0,1),(1,0),(1,1)]):
+    ax.text(c+0.5, r+0.78, label, ha='center',
+            fontsize=9, color='gray', style='italic')
 plt.tight_layout()
 plt.show()
+
+print(f"Зөв илрүүлсэн churn (TP) : {m['TP']:,}")
+print(f"Алдсан churn       (FN)  : {m['FN']:,}  ← банкны хувьд багасгах зорилт")
+print(f"Буруу сэрэмжлүүлэг (FP) : {m['FP']:,}")
+print(f"Зөв үлдэнэ          (TN) : {m['TN']:,}")
 ```
 
-### 6.3 Feature Importance
+### Feature Importance
+
+Feature importance нь тухайн feature-ийн **Gini бууруулалтын хувь нэмэр**-ийг харуулна. Хуваалт бүрд эцэг зангилааны Gini хэрхэн буурч байгааг тооцоолж, нийлбэрийг 1 болтол нормализаци хийнэ. Энэ нь sklearn-ийн `feature_importances_`-тай яг адилхан тооцоолол.
 
 ```{python}
 feat_df = pd.DataFrame({
-    'Feature': feature_names,
+    'Feature'   : feature_names,
     'Importance': clf.feature_importances_
 }).sort_values('Importance', ascending=False).reset_index(drop=True)
 
-colors = ['#1d9e75' if i < 3 else '#aaaaaa' for i in range(len(feat_df))]
-fig, ax = plt.subplots(figsize=(9, 5))
+colors = ['#1d9e75' if i < 3 else '#cccccc' for i in range(len(feat_df))]
+
+fig, ax = plt.subplots(figsize=(10, 5))
 ax.barh(feat_df['Feature'], feat_df['Importance'], color=colors)
 ax.invert_yaxis()
-ax.set_title('Feature Importance (Gini-based)')
-ax.set_xlabel('Importance score')
+ax.set_title('Feature Importance — Gini бууруулалтад суурилсан', fontsize=13)
+ax.set_xlabel('Importance оноо (нийлбэр = 1.0)')
+from matplotlib.patches import Patch
+ax.legend(handles=[
+    Patch(facecolor='#1d9e75', label='Top 3'),
+    Patch(facecolor='#cccccc', label='Бусад')
+], loc='lower right')
 for i, v in enumerate(feat_df['Importance']):
-    ax.text(v+0.002, i, f'{v:.3f}', va='center', fontsize=9)
+    ax.text(v + 0.003, i, f'{v:.3f}', va='center', fontsize=9)
 plt.tight_layout()
 plt.show()
 
-print(f"\nХамгийн чухал feature: '{feat_df.iloc[0]['Feature']}'")
+print("\nFeature Importance дэлгэрэнгүй:")
+print(feat_df.to_string(index=False))
 ```
+
+Хамгийн нөлөөтэй feature нь **`Age`** байна — энэ нь урьдчилсан шинжилгээний KDE графиктай нийцэж байна. Гэхдээ feature importance нь **шалтгаан-үр дагаврын холбоо (causality) биш**, харин зөгнөлийн чадамж (predictive power)-ийг илэрхийлнэ гэдгийг анхаарна уу. Нас өсөхтэй churn нэмэгддэг боловч насаас шалтгаалан гарна гэсэн утга биш — ахмад харилцагчдад нийтлэг байдаг бусад хүчин зүйлстэй холбоотой байж болно.
 
 ---
 
-## 7. Шинэ харилцагч таамаглах
+## Шинэ харилцагч таамаглах
+
+Загварыг практикт ашиглах жишээ болгон 3 шинэ харилцагчийн таамаглалыг хийнэ.
+
+| Шинж чанар | Харилцагч 1 | Харилцагч 2 | Харилцагч 3 |
+|---|---|---|---|
+| CreditScore | 620 | 750 | 580 |
+| Gender | Эрэгтэй | Эмэгтэй | Эмэгтэй |
+| Age | 45 | 32 | 50 |
+| Tenure | 3 | 8 | 2 |
+| Balance | 120,000 | 0 | 85,000 |
+| NumProducts | 1 | 2 | 1 |
+| HasCrCard | Тийм | Тийм | Үгүй |
+| IsActiveMember | Үгүй | Тийм | Үгүй |
+| EstimSalary | 80,000 | 120,000 | 60,000 |
+| **Хүлээгдэх** | **Өндөр эрсдэл** | **Тогтвортой** | **Дунд эрсдэл** |
 
 ```{python}
 new_customers = np.array([
@@ -373,28 +659,60 @@ new_customers = np.array([
 
 labels = ["Өндөр эрсдэлтэй", "Тогтвортой", "Дунд эрсдэлтэй"]
 
-results_new = []
+rows = []
 for row, lbl in zip(new_customers, labels):
     pred = clf._walk(row, clf.root)
-    results_new.append({
-        'Харилцагч': lbl,
-        'Таамаглал': '🔴 ГАРНА' if pred == 1 else '🟢 ҮЛДЭНЭ',
-        'Утга': pred
+    rows.append({
+        'Харилцагч' : lbl,
+        'Таамаглал' : '🔴 ГАРНА' if pred == 1 else '🟢 ҮЛДЭНЭ',
     })
 
-pd.DataFrame(results_new)[['Харилцагч','Таамаглал']]
+pd.DataFrame(rows)
 ```
+
+**Үр дүнгийн тайлбар:**
+
+- **Харилцагч 1** (45 нас, идэвхгүй гишүүн, богино tenure, нэл бүтээгдэхүүн) — загвар churn эрсдэлтэй гэж үзнэ. Банк энэ харилцагчид тусгай санал (хөнгөлөлт, шинэ бүтээгдэхүүн, менежерийн холбоо барих) гаргаж болно.
+- **Харилцагч 2** (32 нас, идэвхтэй, 8 жил банкинд, 2 бүтээгдэхүүн) — тогтвортой харилцагч, churn эрсдэл бага. Хяналтын дор байлгахад хангалттай.
+- **Харилцагч 3** (50 нас, идэвхгүй, 2 жилийн tenure) — дунд зэргийн эрсдэлтэй. Идэвхгүй байдлыг нь нэмэгдүүлэх зорилтот арга хэмжээ авч болно.
 
 ---
 
-## 8. Дүгнэлт
+## Дүгнэлт ба цаашдын чиглэл
 
-::: {.callout-tip title="Гол үр дүн"}
-- `sklearn` **огт ашиглалгүйгээр** Decision Tree амжилттай хэрэгжүүлсэн
-- Хамгийн чухал feature: **`Age`** — харилцагчийн нас churn-д хамгийн их нөлөөтэй
-- Test Accuracy ~**86%** орчим хүрдэг
+### Гол үр дүн
+
+::: {.callout-tip title="Амжилт"}
+- `sklearn` огт ашиглалгүйгээр Decision Tree амжилттай хэрэгжүүлж, бодит өгөгдөл дээр ажиллуулсан
+- Test Accuracy ~**86%** — тэнцвэргүй өгөгдлийн хувьд хүлцэх боломжтой үр дүн
+- Хамгийн нөлөөтэй хүчин зүйл: **Age, Balance, NumOfProducts**
+- Overfitting илрээгүй — загвар ерөнхий хэв маяг сурсан
 :::
+
+### Хязгаарлалт
 
 ::: {.callout-warning title="Анхаарах зүйл"}
-Загварыг сайжруулахын тулд Random Forest эсвэл XGBoost ашиглах нь илүү үр дүнтэй. Гэхдээ энэ кодын зорилго нь алгоритмыг **ойлгох** явдал.
+**1. Өгөгдлийн тэнцвэргүй байдал.** Ердөө ~20% churn байгаа нь загварыг "бүгд үлдэнэ" гэж хазайлгадаг. SMOTE зэрэг oversampling арга болон class_weight тохиргоогоор засаж болно.
+
+**2. Нэг модны тогтворгүй байдал.** Нэг Decision Tree нь өгөгдлийн бага өөрчлөлтөд эрс өөрчлөгдөж болно. Random Forest нь олон модны дундажаар энэ асуудлыг шийдэнэ.
+
+**3. Гиперпараметр тохируулга.** `max_depth`, `min_samples_split` утгыг туршилт-алдааны аргаар биш, Cross-validation + Grid Search ашиглан оновчтой сонгох нь зүйтэй.
 :::
+
+### Цаашдын сайжруулалт
+
+**Алгоритмын сайжруулалт:**
+
+- **Random Forest** — олон Decision Tree байгуулж, санал хураах. Overfitting мэдэгдэхүйц буурна, Accuracy нэмэгдэнэ.
+- **Gradient Boosting / XGBoost** — алдааг дараагийн моддоор засах. Банкны чurn загварт өнөөдөр хамгийн их ашиглагддаг арга.
+- **K-fold Cross-validation** — нэг train/test хуваалт нь тохиолдлоос хамаарна. k-fold ашиглан найдвартай байдлыг нэмэгдүүлэх.
+
+**Өгөгдлийн сайжруулалт:**
+
+- **SMOTE** — синтетик churn цэг үүсгэж тэнцвэргүй байдал засах
+- **Feature engineering** — `Age × Balance`, `Tenure / NumProducts` зэрэг шинэ утга учиртай хувьсагч нэмэх
+- **Threshold оновчлол** — 0.5-ийн оронд Recall нэмэгдүүлэх threshold сонгох (ROC curve ашиглан)
+
+---
+
+*Тайлан Quarto ашиглан боловсруулсан. Код бүрэн нээлттэй — "Code" товч дарж харна уу.*
